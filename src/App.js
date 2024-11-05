@@ -1,49 +1,51 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
+import io from "socket.io-client";
 
 function App() {
   const [printers, setPrinters] = useState([]);
   const [selectedPrinter, setSelectedPrinter] = useState("");
   const [status, setStatus] = useState("");
   const [message, setMessage] = useState("");
+  const socketRef = useRef(null);
 
   useEffect(() => {
-    // Create a WebSocket connection to the PrintEase server
-    const ws = new WebSocket("ws://localhost:12345");
+    const socketUrl = "wss://localhost:12345";
+ 
+    socketRef.current = io(socketUrl, {
+      secure: true,
+      rejectUnauthorized: false,
+      // transports: ["websocket"], 
+    });
 
-    ws.onopen = () => {
-      console.log("Connected to PrintEase WebSocket");
+    socketRef.current.on("connect", () => {
       setStatus("Connected");
-      // Request the list of available printers
-      ws.send(JSON.stringify({ action: "listPrinters" }));
-    };
+      socketRef.current.emit("listPrinters");
+    });
 
-    ws.onmessage = (event) => {
-      const response = JSON.parse(event.data);
+    socketRef.current.on("printers", (data) => {
+      setPrinters(data);
+    });
 
-      if (response.type === "printers") {
-        setPrinters(response.data);
-      } else if (response.status) {
-        setMessage(
-          response.status === "success"
-            ? "Print job sent successfully"
-            : `Error: ${response.message}`
-        );
-      }
-    };
+    socketRef.current.on("printStatus", (response) => {
+      setMessage(
+        response.status === "success"
+          ? "Print job sent successfully"
+          : `Error: ${response.message}`
+      );
+    });
 
-    ws.onclose = () => {
-      console.log("Disconnected from WebSocket");
+    socketRef.current.on("disconnect", (reason) => {
       setStatus("Disconnected");
-    };
+    });
 
-    ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
+    socketRef.current.on("connect_error", (error) => {
       setStatus("Error");
-    };
+    });
 
-    // Cleanup on component unmount
     return () => {
-      ws.close();
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
     };
   }, []);
 
@@ -53,28 +55,23 @@ function App() {
       return;
     }
 
-    // Sample print data (this could be modified as needed)
     const printData = "^XA^FO50,50^ADN,36,20^FDHello, PrintEase!^FS^XZ";
 
-    // Send print command to the WebSocket server
-    const ws = new WebSocket("ws://localhost:12345");
-    ws.onopen = () => {
-      ws.send(
-        JSON.stringify({
-          action: "print",
-          data: {
-            printerName: selectedPrinter,
-            printData: printData,
-            printerType: "ZPL", 
-          },
-        })
-      );
-    };
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit("print", {
+        printerName: selectedPrinter,
+        printData: printData,
+        printerType: "ZPL",
+      });
+    } else {
+      setStatus("Disconnected");
+      setMessage("Unable to send print command: Socket.IO is not connected.");
+    }
   };
 
   return (
     <div style={{ padding: "20px" }}>
-      <h1>PrintEase Test App</h1>
+      <h1>PrintEase Testing</h1>
       <p>Status: {status}</p>
 
       <div>
